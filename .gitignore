@@ -55,3 +55,4 @@ pnpm-debug.log*
 *.tsbuildinfo
 .temp
 .tmp
+.kilo/package-lock.json
