@@ -2,24 +2,43 @@
 	import type { Component } from 'svelte';
 	import type { ViewId } from '$lib/app/navigation';
 	import type { ScheduleCard } from '$lib/app/academic';
-	import type { SelectCoursesResult, SelectClassRoomsResult, SelectLecturersResult } from '$lib/server/sql';
+	import type {
+		SelectCoursesResult,
+		SelectClassRoomsResult,
+		SelectLecturersResult
+	} from '$lib/server/sql';
 	import { DAY_LABELS, conflictToneVariables, beautifyRoomType } from '$lib/app/academic';
 	import { days } from '$lib/validations/enrollment';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Search } from '@lucide/svelte';
 
+	type CalendarViewState = {
+		enrollmentSearch: string;
+		scheduleDayFilter: string;
+		scheduleCourseFilter: string;
+		scheduleRoomFilter: string;
+		scheduleLecturerFilter: string;
+		scheduleSemesterFilter: string;
+		scheduleAcademicYearFilter: string;
+		scheduleRoomFilterSearch: string;
+		scheduleRoomFilterOpen: boolean;
+		selectedConflictGroupId: string | null;
+	};
+
 	let {
-		enrollmentSearch = $bindable(''),
-		scheduleDayFilter = $bindable(''),
-		scheduleCourseFilter = $bindable(''),
-		scheduleRoomFilter = $bindable(''),
-		scheduleLecturerFilter = $bindable(''),
-		scheduleSemesterFilter = $bindable(''),
-		scheduleAcademicYearFilter = $bindable(''),
-		scheduleRoomFilterSearch = $bindable(''),
-		scheduleRoomFilterOpen = $bindable(false),
-		selectedConflictGroupId = $bindable(null),
+		state = $bindable<CalendarViewState>({
+			enrollmentSearch: '',
+			scheduleDayFilter: '',
+			scheduleCourseFilter: '',
+			scheduleRoomFilter: '',
+			scheduleLecturerFilter: '',
+			scheduleSemesterFilter: '',
+			scheduleAcademicYearFilter: '',
+			scheduleRoomFilterSearch: '',
+			scheduleRoomFilterOpen: false,
+			selectedConflictGroupId: null
+		}),
 		calendarWeekLabel,
 		courses,
 		lecturers,
@@ -56,16 +75,7 @@
 		focusSchedule,
 		handleKeyboardClick
 	}: {
-		enrollmentSearch: string;
-		scheduleDayFilter: string;
-		scheduleCourseFilter: string;
-		scheduleRoomFilter: string;
-		scheduleLecturerFilter: string;
-		scheduleSemesterFilter: string;
-		scheduleAcademicYearFilter: string;
-		scheduleRoomFilterSearch: string;
-		scheduleRoomFilterOpen: boolean;
-		selectedConflictGroupId: string | null;
+		state: CalendarViewState;
 		calendarWeekLabel: string;
 		courses: SelectCoursesResult[];
 		lecturers: SelectLecturersResult[];
@@ -136,7 +146,7 @@
 					<div class="search-box compact">
 						<Search size={16} />
 						<input
-							bind:value={enrollmentSearch}
+							bind:value={state.enrollmentSearch}
 							aria-label="Cari jadwal kalender"
 							placeholder="Cari mahasiswa, mata kuliah, ruang, atau dosen"
 							oninput={() => queueCollectionRefresh('enrollments')}
@@ -146,7 +156,7 @@
 				<label>
 					<span>Hari</span>
 					<select
-						bind:value={scheduleDayFilter}
+						bind:value={state.scheduleDayFilter}
 						onchange={() => queueCollectionRefresh('enrollments', 0)}
 					>
 						<option value="">Semua hari</option>
@@ -158,7 +168,7 @@
 				<label>
 					<span>Mata kuliah</span>
 					<select
-						bind:value={scheduleCourseFilter}
+						bind:value={state.scheduleCourseFilter}
 						onchange={() => queueCollectionRefresh('enrollments', 0)}
 					>
 						<option value="">Semua mata kuliah</option>
@@ -173,7 +183,7 @@
 						class="combobox-wrap"
 						onfocusout={(e) => {
 							if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-								scheduleRoomFilterOpen = false;
+								state.scheduleRoomFilterOpen = false;
 							}
 						}}
 					>
@@ -181,23 +191,23 @@
 							type="text"
 							class="combobox-input"
 							placeholder="Cari ruang filter..."
-							value={scheduleRoomFilter
+							value={state.scheduleRoomFilter
 								? selectedScheduleRoomFilterLabel
-								: scheduleRoomFilterSearch}
+								: state.scheduleRoomFilterSearch}
 							oninput={(e) => {
-								scheduleRoomFilterSearch = (e.currentTarget as HTMLInputElement).value;
-								if (scheduleRoomFilter) {
-									scheduleRoomFilter = '';
+								state.scheduleRoomFilterSearch = (e.currentTarget as HTMLInputElement).value;
+								if (state.scheduleRoomFilter) {
+									state.scheduleRoomFilter = '';
 									queueCollectionRefresh('enrollments', 0);
 								}
 								queueScheduleRoomFilterRefresh();
-								scheduleRoomFilterOpen = true;
+								state.scheduleRoomFilterOpen = true;
 							}}
 							onfocus={(e) => {
-								if (scheduleRoomFilter) {
+								if (state.scheduleRoomFilter) {
 									(e.currentTarget as HTMLInputElement).select();
 								}
-								scheduleRoomFilterOpen = true;
+								state.scheduleRoomFilterOpen = true;
 								if (!scheduleRoomFilterOptions.length) {
 									queueScheduleRoomFilterRefresh(0);
 								}
@@ -205,21 +215,21 @@
 						/>
 						{#if scheduleRoomFilterIssue}
 							<p class="combobox-error">{scheduleRoomFilterIssue}</p>
-						{:else if scheduleRoomFilterOpen && scheduleRoomFilterLoading && !scheduleRoomFilterOptions.length}
+						{:else if state.scheduleRoomFilterOpen && scheduleRoomFilterLoading && !scheduleRoomFilterOptions.length}
 							<p class="combobox-empty">Memuat ruang kelas...</p>
-						{:else if scheduleRoomFilterOpen}
+						{:else if state.scheduleRoomFilterOpen}
 							<div class="combobox-dropdown" role="listbox">
 								<button
 									type="button"
 									role="option"
-									aria-selected={!scheduleRoomFilter}
+									aria-selected={!state.scheduleRoomFilter}
 									class="combobox-option"
-									class:active={!scheduleRoomFilter}
+									class:active={!state.scheduleRoomFilter}
 									onmousedown={(e) => {
 										e.preventDefault();
-										scheduleRoomFilter = '';
-										scheduleRoomFilterSearch = '';
-										scheduleRoomFilterOpen = false;
+										state.scheduleRoomFilter = '';
+										state.scheduleRoomFilterSearch = '';
+										state.scheduleRoomFilterOpen = false;
 										queueCollectionRefresh('enrollments', 0);
 									}}
 								>
@@ -230,20 +240,19 @@
 									<button
 										type="button"
 										role="option"
-										aria-selected={scheduleRoomFilter === item.id}
+										aria-selected={state.scheduleRoomFilter === item.id}
 										class="combobox-option"
-										class:active={scheduleRoomFilter === item.id}
+										class:active={state.scheduleRoomFilter === item.id}
 										onmousedown={(e) => {
 											e.preventDefault();
-											scheduleRoomFilter = item.id ?? '';
-											scheduleRoomFilterSearch = '';
-											scheduleRoomFilterOpen = false;
+											state.scheduleRoomFilter = item.id ?? '';
+											state.scheduleRoomFilterSearch = '';
+											state.scheduleRoomFilterOpen = false;
 											queueCollectionRefresh('enrollments', 0);
 										}}
 									>
 										<strong>{item.name}</strong>
-										<span
-											>{beautifyRoomType(item.class_room_type)} • kapasitas {item.capacity}</span
+										<span>{beautifyRoomType(item.class_room_type)} • kapasitas {item.capacity}</span
 										>
 									</button>
 								{/each}
@@ -275,7 +284,7 @@
 				<label>
 					<span>Dosen</span>
 					<select
-						bind:value={scheduleLecturerFilter}
+						bind:value={state.scheduleLecturerFilter}
 						onchange={() => queueCollectionRefresh('enrollments', 0)}
 					>
 						<option value="">Semua dosen</option>
@@ -287,7 +296,7 @@
 				<label>
 					<span>Semester</span>
 					<select
-						bind:value={scheduleSemesterFilter}
+						bind:value={state.scheduleSemesterFilter}
 						onchange={() => queueCollectionRefresh('enrollments', 0)}
 					>
 						<option value="">Semua semester</option>
@@ -299,7 +308,7 @@
 				<label>
 					<span>Tahun akademik</span>
 					<select
-						bind:value={scheduleAcademicYearFilter}
+						bind:value={state.scheduleAcademicYearFilter}
 						onchange={() => queueCollectionRefresh('enrollments', 0)}
 					>
 						<option value="">Semua tahun</option>
@@ -330,12 +339,12 @@
 			<div class="calendar-conflict-toolbar">
 				<div class="calendar-conflict-toolbar-head">
 					<strong>{calendarConflictLegend.length} grup bentrok</strong>
-					{#if selectedConflictGroupId}
+					{#if state.selectedConflictGroupId}
 						<Button
 							class="ghost-button"
 							variant="ghost"
 							size="sm"
-							onclick={() => (selectedConflictGroupId = null)}
+							onclick={() => (state.selectedConflictGroupId = null)}
 						>
 							Lihat semua
 						</Button>
@@ -367,17 +376,16 @@
 			<section class="calendar-empty-state support-panel">
 				<h3>Terapkan filter jadwal terlebih dahulu</h3>
 				<p class="detail-hint">
-					Kalender penuh disembunyikan. Pilih mata kuliah, ruang, dosen, hari, semester,
-					atau tahun akademik untuk menampilkan jadwal yang ingin dilihat.
+					Kalender penuh disembunyikan. Pilih mata kuliah, ruang, dosen, hari, semester, atau tahun
+					akademik untuk menampilkan jadwal yang ingin dilihat.
 				</p>
 			</section>
 		{:else if calendarExceedsVisibleLimit}
 			<section class="calendar-empty-state support-warning">
 				<h3>Persempit hasil sebelum membuka kalender</h3>
 				<p>
-					{filteredScheduleCards.length} jadwal masih cocok dengan filter saat ini. Kurangi
-					hasil hingga maksimal {calendarMaxVisibleSchedules} jadwal agar kalender tetap
-					mudah dibaca.
+					{filteredScheduleCards.length} jadwal masih cocok dengan filter saat ini. Kurangi hasil hingga
+					maksimal {calendarMaxVisibleSchedules} jadwal agar kalender tetap mudah dibaca.
 				</p>
 			</section>
 		{:else if !filteredScheduleCards.length}
@@ -519,11 +527,8 @@
 											class="entity-link"
 											onkeydown={handleKeyboardClick}
 											onclick={() =>
-												navigateToEntity(
-													'students',
-													peer.original.student_id,
-													peer.student
-												)}>{peer.student}</span
+												navigateToEntity('students', peer.original.student_id, peer.student)}
+											>{peer.student}</span
 										>
 										•
 										<span
@@ -532,11 +537,8 @@
 											class="entity-link"
 											onkeydown={handleKeyboardClick}
 											onclick={() =>
-												navigateToEntity(
-													'lecturers',
-													peer.original.lecturer_id,
-													peer.lecturer
-												)}>{peer.lecturer}</span
+												navigateToEntity('lecturers', peer.original.lecturer_id, peer.lecturer)}
+											>{peer.lecturer}</span
 										>
 										•
 										<span
@@ -545,16 +547,11 @@
 											class="entity-link"
 											onkeydown={handleKeyboardClick}
 											onclick={() =>
-												navigateToEntity(
-													'classrooms',
-													peer.original.class_room_id,
-													peer.room
-												)}>{peer.room}</span
+												navigateToEntity('classrooms', peer.original.class_room_id, peer.room)}
+											>{peer.room}</span
 										></span
 									>
-									<small
-										>{DAY_LABELS[peer.day]} • {peer.startLabel} - {peer.endLabel}</small
-									>
+									<small>{DAY_LABELS[peer.day]} • {peer.startLabel} - {peer.endLabel}</small>
 								</div>
 								<div class="calendar-overlap-actions">
 									<Button
@@ -590,9 +587,7 @@
 								<div class="calendar-overlap-copy">
 									<strong>{peer.course}</strong>
 									<span>{peer.student} • {peer.lecturer} • {peer.room}</span>
-									<small
-										>{DAY_LABELS[peer.day]} • {peer.startLabel} - {peer.endLabel}</small
-									>
+									<small>{DAY_LABELS[peer.day]} • {peer.startLabel} - {peer.endLabel}</small>
 								</div>
 								<div class="calendar-overlap-actions">
 									<Button
@@ -619,14 +614,13 @@
 			{/if}
 		{:else if calendarNeedsFilters}
 			<p class="empty-copy">
-				Kalender mingguan akan tampil setelah filter dipilih. Gunakan daftar bentrok di
-				atas untuk mulai memeriksa jadwal yang bentrok.
+				Kalender mingguan akan tampil setelah filter dipilih. Gunakan daftar bentrok di atas untuk
+				mulai memeriksa jadwal yang bentrok.
 			</p>
 		{:else if calendarExceedsVisibleLimit}
 			<p class="empty-copy">
-				Terlalu banyak jadwal untuk ditampilkan sekaligus. Tambahkan filter sampai
-				hasilnya maksimal {calendarMaxVisibleSchedules} jadwal, atau pilih salah satu grup
-				bentrok di atas untuk melihat rinciannya lebih dulu.
+				Terlalu banyak jadwal untuk ditampilkan sekaligus. Tambahkan filter sampai hasilnya maksimal {calendarMaxVisibleSchedules}
+				jadwal, atau pilih salah satu grup bentrok di atas untuk melihat rinciannya lebih dulu.
 			</p>
 		{:else if !filteredScheduleCards.length}
 			<p class="empty-copy">Belum ada jadwal yang cocok dengan filter saat ini.</p>
