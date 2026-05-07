@@ -70,11 +70,21 @@
 		editorView,
 		collectionPagination,
 		bulkUpdateEnrollmentsEnhance,
+		bulkEditEnrollmentSemester,
+		bulkEditEnrollmentAcademicYear,
+		requestEnrollmentEnhance,
+		studentStudyProgramId = null,
 		days,
 		timezone,
+		onBulkEditEnrollmentSemesterInput,
+		onBulkEditEnrollmentAcademicYearInput,
 		handleKeyboardClick,
 		onNavigateToEntity,
 		onOpenBuilderForEnrollment,
+		onOpenBuilderForApproval,
+		onCancelRequest,
+		onRejectRequest,
+		onStartRequest,
 		onSearchInput,
 		onClearSearch,
 		onResetScheduleFilters,
@@ -110,11 +120,21 @@
 		editorView: string | null;
 		collectionPagination: PaginationState;
 		bulkUpdateEnrollmentsEnhance: EnhancedAction;
+		bulkEditEnrollmentSemester: string;
+		bulkEditEnrollmentAcademicYear: string;
+		requestEnrollmentEnhance?: EnhancedAction;
+		studentStudyProgramId?: string | null;
 		days: typeof dayOptions;
 		timezone: string;
+		onBulkEditEnrollmentSemesterInput: (value: string) => void;
+		onBulkEditEnrollmentAcademicYearInput: (value: string) => void;
 		handleKeyboardClick: (event: KeyboardEvent) => void;
 		onNavigateToEntity: (view: ViewId, id: string | null | undefined, name?: string) => void;
 		onOpenBuilderForEnrollment: (item: SelectEnrollmentsResult) => void;
+		onOpenBuilderForApproval?: (item: SelectEnrollmentsResult) => void;
+		onCancelRequest?: (id: string) => void;
+		onRejectRequest?: (id: string) => void;
+		onStartRequest?: () => void;
 		onSearchInput: () => void;
 		onClearSearch: () => void;
 		onResetScheduleFilters: () => void;
@@ -135,6 +155,12 @@
 	function resolveScheduleCard(item: SelectEnrollmentsResult) {
 		return item.id ? (scheduleCardMap[item.id] ?? null) : null;
 	}
+
+	const requestCourses = $derived(
+		studentStudyProgramId
+			? courses.filter((c) => c.study_program_id === studentStudyProgramId)
+			: courses
+	);
 </script>
 
 <div class="workspace-shell">
@@ -143,6 +169,14 @@
 			<div>
 				<h3>KRS aktif</h3>
 			</div>
+			{#if currentRole === 'STUDENT'}
+				<Button
+					size="sm"
+					class="primary-button"
+					onclick={() => onStartRequest?.()}
+					>Ajukan mata kuliah</Button
+				>
+			{/if}
 		</div>
 		<label class="search-box"
 			><Search size={16} /><input
@@ -170,7 +204,7 @@
 				<span>Mata kuliah</span>
 				<select bind:value={state.scheduleCourseFilter} onchange={onCourseFilterChange}>
 					<option value="">Semua mata kuliah</option>
-					{#each courses as item (item.id)}
+					{#each requestCourses as item (item.id)}
 						<option value={item.id}>{item.name}</option>
 					{/each}
 				</select>
@@ -216,7 +250,7 @@
 				>
 			</div>
 		</div>
-		{#if bulkCount > 0}
+		{#if currentRole !== 'STUDENT' && bulkCount > 0}
 			<div class="bulk-bar">
 				<span class="bulk-count">{bulkCount} KRS dipilih</span>
 				<div class="bulk-actions">
@@ -232,7 +266,7 @@
 			</div>
 		{/if}
 		<div class="list-stack">
-			{#if filteredEnrollments.length > 1}
+			{#if currentRole !== 'STUDENT' && filteredEnrollments.length > 1}
 				<label class="list-row select-all-row">
 					<input
 						type="checkbox"
@@ -250,14 +284,16 @@
 					class:selected={selectedEnrollmentId === item.id}
 					class:checked={item.id != null && bulkSelectedIds.has(item.id)}
 				>
-					<label class="row-checkbox"
-						><input
-							type="checkbox"
-							checked={item.id != null && bulkSelectedIds.has(item.id)}
-							onchange={() => item.id && onBulkToggleId(item.id)}
-							onclick={(e) => e.stopPropagation()}
-						/></label
-					>
+					{#if currentRole !== 'STUDENT'}
+						<label class="row-checkbox"
+							><input
+								type="checkbox"
+								checked={item.id != null && bulkSelectedIds.has(item.id)}
+								onchange={() => item.id && onBulkToggleId(item.id)}
+								onclick={(e) => e.stopPropagation()}
+							/></label
+						>
+					{/if}
 					<div
 						role="button"
 						tabindex="0"
@@ -309,7 +345,12 @@
 								>
 							{/if}
 						</div>
-						<small>{item.semester} • {item.academic_year}</small>
+						<small>
+							{item.semester} • {item.academic_year}
+							{#if item.status === 'PENDING'}
+								<Badge variant="secondary">Menunggu</Badge>
+							{/if}
+						</small>
 					</div>
 				</div>
 			{/each}
@@ -337,15 +378,40 @@
 							: 'Pilih satu KRS'}
 				</h3>
 			</div>
-			{#if selectedEnrollment && editorView !== 'enrollments-bulk' && currentRole !== 'STUDENT'}
+			{#if selectedEnrollment && editorView !== 'enrollments-bulk'}
 				<div class="detail-actions">
-					<Button
-						variant="ghost"
-						size="sm"
-						class="ghost-button"
-						onclick={() => onOpenBuilderForEnrollment(selectedEnrollment)}
-						>Edit di penjadwalan</Button
-					>
+					{#if currentRole === 'STUDENT' && selectedEnrollment.status === 'PENDING'}
+						<Button
+							variant="ghost"
+							size="sm"
+							class="ghost-button"
+							onclick={() => onCancelRequest?.(selectedEnrollment.id!)}
+							>Batalkan pengajuan</Button
+						>
+					{:else if currentRole !== 'STUDENT' && selectedEnrollment.status === 'PENDING'}
+						<Button
+							variant="ghost"
+							size="sm"
+							class="ghost-button"
+							onclick={() => onOpenBuilderForApproval?.(selectedEnrollment)}
+							>Setujui</Button
+						>
+						<Button
+							variant="destructive"
+							size="sm"
+							class="danger-button"
+							onclick={() => onRejectRequest?.(selectedEnrollment.id!)}
+							>Tolak</Button
+						>
+					{:else if currentRole !== 'STUDENT' && selectedEnrollment.status === 'APPROVED'}
+						<Button
+							variant="ghost"
+							size="sm"
+							class="ghost-button"
+							onclick={() => onOpenBuilderForEnrollment(selectedEnrollment)}
+							>Edit di penjadwalan</Button
+						>
+					{/if}
 				</div>
 			{/if}
 		</div>
@@ -355,6 +421,11 @@
 					<p class="builder-conflict-copy">Bentrok dengan {selectedEnrollmentConflictSummary}</p>
 				{/if}
 				<div class="detail-lines">
+					<div>
+						<span>Status</span><strong
+							>{selectedEnrollment.status === 'PENDING' ? 'Menunggu persetujuan' : 'Disetujui'}</strong
+						>
+					</div>
 					<div>
 						<span>Mahasiswa</span><span
 							role="button"
@@ -431,11 +502,65 @@
 					ingin diubah.
 				</p>
 				<input type="hidden" name="ids" value={[...bulkSelectedIds].join(',')} />
+				<label>
+					<span>Semester</span>
+					<select
+						name="semester"
+						value={bulkEditEnrollmentSemester}
+						onchange={(event) =>
+							onBulkEditEnrollmentSemesterInput(
+								(event.currentTarget as HTMLSelectElement).value
+							)}
+					>
+						<option value="">Tidak diubah</option>
+						<option value="GANJIL">GANJIL</option>
+						<option value="GENAP">GENAP</option>
+					</select>
+				</label>
+				<label>
+					<span>Tahun akademik</span>
+					<input
+						name="academicYear"
+						value={bulkEditEnrollmentAcademicYear}
+						oninput={(event) =>
+							onBulkEditEnrollmentAcademicYearInput(
+								(event.currentTarget as HTMLInputElement).value
+							)}
+						placeholder="Contoh: 2025/2026"
+					/>
+				</label>
 				<div class="builder-inline-actions">
 					<Button type="button" variant="ghost" class="ghost-button" onclick={onBulkClear}
 						>Batal</Button
 					>
 					<Button type="submit" class="primary-button">Simpan perubahan {bulkCount} KRS</Button>
+				</div>
+			</form>
+		{:else if currentRole === 'STUDENT' && requestEnrollmentEnhance}
+			<form class="editor-grid" {...requestEnrollmentEnhance}>
+				<p class="editor-note">Ajukan mata kuliah baru untuk semester ini.</p>
+				<label>
+					<span>Mata kuliah</span>
+				<select name="courseId" required>
+					<option value="" disabled selected>Pilih mata kuliah</option>
+					{#each requestCourses as course (course.id)}
+						<option value={course.id}>{course.name}</option>
+					{/each}
+					</select>
+				</label>
+				<label>
+					<span>Semester</span>
+					<select name="semester" required>
+						<option value="GANJIL">Ganjil</option>
+						<option value="GENAP">Genap</option>
+					</select>
+				</label>
+				<label>
+					<span>Tahun akademik</span>
+					<input type="text" name="academicYear" value="2025/2026" required />
+				</label>
+				<div class="builder-inline-actions">
+					<Button type="submit" class="primary-button">Ajukan mata kuliah</Button>
 				</div>
 			</form>
 		{:else}

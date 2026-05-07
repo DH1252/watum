@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { AppRole } from '$lib/app/academic';
 	import type { Component } from 'svelte';
 	import type { ViewId } from '$lib/app/navigation';
 	import type { ScheduleCard } from '$lib/app/academic';
@@ -39,6 +40,7 @@
 			scheduleRoomFilterOpen: false,
 			selectedConflictGroupId: null
 		}),
+		currentRole,
 		calendarWeekLabel,
 		courses,
 		lecturers,
@@ -73,9 +75,11 @@
 		navigateToEntity,
 		openBuilderForSchedule,
 		focusSchedule,
-		handleKeyboardClick
+		handleKeyboardClick,
+		studentStudyProgramId = null
 	}: {
 		state: CalendarViewState;
+		currentRole: AppRole;
 		calendarWeekLabel: string;
 		courses: SelectCoursesResult[];
 		lecturers: SelectLecturersResult[];
@@ -119,7 +123,14 @@
 		openBuilderForSchedule: (card: ScheduleCard) => void;
 		focusSchedule: (card: ScheduleCard) => void;
 		handleKeyboardClick: (event: KeyboardEvent) => void;
+		studentStudyProgramId?: string | null;
 	} = $props();
+
+	const calendarCourses = $derived(
+		studentStudyProgramId
+			? courses.filter((c) => c.study_program_id === studentStudyProgramId)
+			: courses
+	);
 
 	function conflictGroupMetaCopy(
 		details: { count: number; lecturers: string; rooms: string } | null
@@ -172,7 +183,7 @@
 						onchange={() => queueCollectionRefresh('enrollments', 0)}
 					>
 						<option value="">Semua mata kuliah</option>
-						{#each courses as item (item.id)}
+						{#each calendarCourses as item (item.id)}
 							<option value={item.id}>{item.name}</option>
 						{/each}
 					</select>
@@ -434,14 +445,16 @@
 						</p>
 					{/if}
 				</div>
-				<Button
-					class="ghost-button"
-					variant="ghost"
-					size="sm"
-					onclick={() => openBuilderForSchedule(calendarDetailSchedule)}
-				>
-					Buka di penjadwalan
-				</Button>
+				{#if currentRole !== 'STUDENT'}
+					<Button
+						class="ghost-button"
+						variant="ghost"
+						size="sm"
+						onclick={() => openBuilderForSchedule(calendarDetailSchedule)}
+					>
+						Buka di penjadwalan
+					</Button>
+				{/if}
 			</div>
 			<div class="detail-lines">
 				<div>

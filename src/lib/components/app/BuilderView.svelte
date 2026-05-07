@@ -21,6 +21,7 @@
 	import { Search, X } from '@lucide/svelte';
 
 	type BuilderStep = 'participant' | 'time' | 'room' | 'review';
+	type BuilderMode = 'create' | 'edit' | 'approve';
 
 	type FieldAccessor = {
 		as: (...args: unknown[]) => Record<string, unknown>;
@@ -37,6 +38,17 @@
 			endTime: FieldAccessor;
 			semester: FieldAccessor;
 			academicYear: FieldAccessor;
+			timezone: FieldAccessor;
+		};
+	};
+
+	type ApprovalFormState = {
+		fields: {
+			id: FieldAccessor;
+			classRoomId: FieldAccessor;
+			day: FieldAccessor;
+			startTime: FieldAccessor;
+			endTime: FieldAccessor;
 			timezone: FieldAccessor;
 		};
 	};
@@ -201,8 +213,11 @@
 		roomPickerHasMore,
 		createEnrollment,
 		updateEnrollment,
+		approveEnrollment,
+		builderMode,
 		createEnrollmentEnhance,
 		updateEnrollmentEnhance,
+		approveEnrollmentEnhance,
 		handleKeyboardClick,
 		onClearSelection,
 		onQueueEnrollmentRefresh,
@@ -283,8 +298,11 @@
 		roomPickerHasMore: boolean;
 		createEnrollment: unknown;
 		updateEnrollment: unknown;
+		approveEnrollment: unknown;
+		builderMode: BuilderMode;
 		createEnrollmentEnhance: EnhancedAction;
 		updateEnrollmentEnhance: EnhancedAction;
+		approveEnrollmentEnhance: EnhancedAction;
 		handleKeyboardClick: (event: KeyboardEvent) => void;
 		onClearSelection: () => void;
 		onQueueEnrollmentRefresh: (delay?: number) => void;
@@ -339,6 +357,29 @@
 		) && enrollmentDraft.startTime < enrollmentDraft.endTime
 	);
 	const roomStepReady = $derived(Boolean(enrollmentDraft.classRoomId));
+	const participantStepLocked = $derived(builderMode !== 'create');
+	const termStepLocked = $derived(builderMode !== 'create');
+	const builderTitle = $derived(
+		builderMode === 'approve'
+			? 'Setujui pengajuan KRS'
+			: selectedEnrollmentId
+				? 'Edit jadwal terpilih'
+				: 'Tambah jadwal baru'
+	);
+	const builderSubmitLabel = $derived(
+		builderMode === 'approve'
+			? 'Setujui KRS'
+			: selectedEnrollmentId
+				? 'Simpan perubahan'
+				: 'Simpan jadwal'
+	);
+	const participantStepNote = $derived(
+		builderMode === 'approve'
+			? 'Mahasiswa, mata kuliah, semester, dan tahun akademik mengikuti pengajuan yang akan disetujui.'
+			: builderMode === 'edit'
+				? 'Mahasiswa, mata kuliah, semester, dan tahun akademik dikunci agar perubahan tetap fokus pada jadwal.'
+				: 'Pilih mahasiswa dan mata kuliah dulu agar cek waktu dan ruang tetap relevan.'
+	);
 
 	function createEnrollmentForm() {
 		return createEnrollment as EnrollmentFormState;
@@ -346,6 +387,10 @@
 
 	function updateEnrollmentForm() {
 		return updateEnrollment as EnrollmentFormState;
+	}
+
+	function approveEnrollmentForm() {
+		return approveEnrollment as ApprovalFormState;
 	}
 
 	function clampActiveIndex(nextIndex: number, count: number) {
@@ -627,6 +672,11 @@
 			roomPickerActiveIndex = -1;
 		}
 	}
+
+	function currentScheduleFieldAccessor() {
+		if (builderMode === 'approve') return approveEnrollmentForm().fields;
+		return selectedEnrollmentId ? updateEnrollmentForm().fields : createEnrollmentForm().fields;
+	}
 </script>
 
 <div class={className}>
@@ -735,8 +785,7 @@
 								class="combobox-option"
 								class:active={scheduleCourseFilterActiveIndex === 0 ||
 									!filterState.scheduleCourseFilter}
-								onmousedown={(e) => {
-									e.preventDefault();
+								onclick={() => {
 									selectScheduleCourseFilterOption(null);
 								}}
 								onfocus={() => (scheduleCourseFilterActiveIndex = 0)}
@@ -754,8 +803,7 @@
 									class="combobox-option"
 									class:active={scheduleCourseFilterActiveIndex === index + 1 ||
 										filterState.scheduleCourseFilter === item.id}
-									onmousedown={(e) => {
-										e.preventDefault();
+									onclick={() => {
 										selectScheduleCourseFilterOption(item);
 									}}
 									onfocus={() => (scheduleCourseFilterActiveIndex = index + 1)}
@@ -776,8 +824,7 @@
 										type="button"
 										class="combobox-more"
 										disabled={!scheduleCourseFilterHasMore || scheduleCourseFilterLoading}
-										onmousedown={(e) => {
-											e.preventDefault();
+										onclick={() => {
 											onLoadMoreScheduleCourseFilterOptions();
 										}}
 									>
@@ -851,8 +898,7 @@
 								class="combobox-option"
 								class:active={scheduleRoomFilterActiveIndex === 0 ||
 									!filterState.scheduleRoomFilter}
-								onmousedown={(e) => {
-									e.preventDefault();
+								onclick={() => {
 									selectScheduleRoomFilterOption(null);
 								}}
 								onfocus={() => (scheduleRoomFilterActiveIndex = 0)}
@@ -870,8 +916,7 @@
 									class="combobox-option"
 									class:active={scheduleRoomFilterActiveIndex === index + 1 ||
 										filterState.scheduleRoomFilter === item.id}
-									onmousedown={(e) => {
-										e.preventDefault();
+									onclick={() => {
 										selectScheduleRoomFilterOption(item);
 									}}
 									onfocus={() => (scheduleRoomFilterActiveIndex = index + 1)}
@@ -891,8 +936,7 @@
 										type="button"
 										class="combobox-more"
 										disabled={!scheduleRoomFilterHasMore || scheduleRoomFilterLoading}
-										onmousedown={(e) => {
-											e.preventDefault();
+										onclick={() => {
 											onLoadMoreScheduleRoomFilterOptions();
 										}}
 									>
@@ -966,8 +1010,7 @@
 								class="combobox-option"
 								class:active={scheduleLecturerFilterActiveIndex === 0 ||
 									!filterState.scheduleLecturerFilter}
-								onmousedown={(e) => {
-									e.preventDefault();
+								onclick={() => {
 									selectScheduleLecturerFilterOption(null);
 								}}
 								onfocus={() => (scheduleLecturerFilterActiveIndex = 0)}
@@ -985,8 +1028,7 @@
 									class="combobox-option"
 									class:active={scheduleLecturerFilterActiveIndex === index + 1 ||
 										filterState.scheduleLecturerFilter === item.id}
-									onmousedown={(e) => {
-										e.preventDefault();
+									onclick={() => {
 										selectScheduleLecturerFilterOption(item);
 									}}
 									onfocus={() => (scheduleLecturerFilterActiveIndex = index + 1)}
@@ -1008,8 +1050,7 @@
 										type="button"
 										class="combobox-more"
 										disabled={!scheduleLecturerFilterHasMore || scheduleLecturerFilterLoading}
-										onmousedown={(e) => {
-											e.preventDefault();
+										onclick={() => {
 											onLoadMoreScheduleLecturerFilterOptions();
 										}}
 									>
@@ -1154,7 +1195,7 @@
 	<section class="workspace-detail builder-detail">
 		<div class="pane-head compact">
 			<div>
-				<h3>{selectedEnrollmentId ? 'Edit jadwal terpilih' : 'Tambah jadwal baru'}</h3>
+				<h3>{builderTitle}</h3>
 				{#if selectedEnrollmentScheduleCard?.hasConflict && selectedEnrollmentConflictSummary}
 					<p
 						class="builder-conflict-copy"
@@ -1169,7 +1210,7 @@
 					{/if}
 				{/if}
 			</div>
-			{#if selectedEnrollmentId}
+			{#if selectedEnrollmentId && builderMode === 'edit'}
 				<Button
 					variant="destructive"
 					size="sm"
@@ -1213,20 +1254,24 @@
 
 		<form
 			class="builder-form"
-			{...selectedEnrollmentId ? updateEnrollmentEnhance : createEnrollmentEnhance}
+			{...builderMode === 'approve'
+				? approveEnrollmentEnhance
+				: selectedEnrollmentId
+					? updateEnrollmentEnhance
+					: createEnrollmentEnhance}
 		>
 			<input
 				type="hidden"
-				{...selectedEnrollmentId
-					? updateEnrollmentForm().fields.timezone.as('text')
-					: createEnrollmentForm().fields.timezone.as('text')}
+				{...currentScheduleFieldAccessor().timezone.as('text')}
 				value={enrollmentDraft.timezone}
 			/>
 
 			{#if selectedEnrollmentId}
 				<input
 					type="hidden"
-					{...updateEnrollmentForm().fields.id?.as('text')}
+					{...(builderMode === 'approve'
+						? approveEnrollmentForm().fields.id.as('text')
+						: updateEnrollmentForm().fields.id?.as('text'))}
 					value={enrollmentDraft.id}
 				/>
 			{/if}
@@ -1301,10 +1346,30 @@
 			>
 				<div class="builder-section-head">
 					<h4>Pilih peserta dan mata kuliah</h4>
-					<p class="builder-note">
-						Pilih mahasiswa dan mata kuliah dulu agar cek waktu dan ruang tetap relevan.
-					</p>
+					<p class="builder-note">{participantStepNote}</p>
 				</div>
+				{#if participantStepLocked}
+					{#if builderMode === 'edit'}
+						<input
+							type="hidden"
+							{...updateEnrollmentForm().fields.studentId.as('text')}
+							value={enrollmentDraft.studentId}
+						/>
+						<input
+							type="hidden"
+							{...updateEnrollmentForm().fields.courseId.as('text')}
+							value={enrollmentDraft.courseId}
+						/>
+					{/if}
+					<div class="detail-lines">
+						<div>
+							<span>Mahasiswa</span><strong>{selectedDraftStudent}</strong>
+						</div>
+						<div>
+							<span>Mata kuliah</span><strong>{selectedDraftCourse}</strong>
+						</div>
+					</div>
+				{:else}
 				<div class="editor-grid">
 					<label>
 						<span>Mahasiswa</span>
@@ -1368,8 +1433,7 @@
 											class="combobox-option"
 											class:active={studentPickerActiveIndex === index ||
 												enrollmentDraft.studentId === item.id}
-											onmousedown={(e) => {
-												e.preventDefault();
+											onclick={() => {
 												selectStudentPickerOption(item);
 											}}
 											onfocus={() => (studentPickerActiveIndex = index)}
@@ -1388,8 +1452,7 @@
 												type="button"
 												class="combobox-more"
 												disabled={!studentPickerHasMore || studentPickerLoading}
-												onmousedown={(e) => {
-													e.preventDefault();
+												onclick={() => {
 													onLoadMoreStudentPickerOptions();
 												}}
 											>
@@ -1463,8 +1526,7 @@
 											class="combobox-option"
 											class:active={coursePickerActiveIndex === index ||
 												enrollmentDraft.courseId === item.id}
-											onmousedown={(e) => {
-												e.preventDefault();
+											onclick={() => {
 												selectCoursePickerOption(item);
 											}}
 											onfocus={() => (coursePickerActiveIndex = index)}
@@ -1483,8 +1545,7 @@
 												type="button"
 												class="combobox-more"
 												disabled={!coursePickerHasMore || coursePickerLoading}
-												onmousedown={(e) => {
-													e.preventDefault();
+												onclick={() => {
 													onLoadMoreCoursePickerOptions();
 												}}
 											>
@@ -1499,6 +1560,7 @@
 						</div>
 					</label>
 				</div>
+				{/if}
 				<div class="builder-section-actions">
 					<p class="editor-note">
 						Langkah berikutnya akan menampilkan slot dan ruang yang masih bisa dipakai.
@@ -1523,9 +1585,7 @@
 					<label>
 						<span>Hari</span>
 						<select
-							{...selectedEnrollmentId
-								? updateEnrollmentForm().fields.day.as('select')
-								: createEnrollmentForm().fields.day.as('select')}
+							{...currentScheduleFieldAccessor().day.as('select')}
 							bind:value={enrollmentDraft.day}
 						>
 							{#each days as day (day)}
@@ -1538,9 +1598,7 @@
 						<span>Mulai</span>
 						<input
 							type="datetime-local"
-							{...selectedEnrollmentId
-								? updateEnrollmentForm().fields.startTime.as('text')
-								: createEnrollmentForm().fields.startTime.as('text')}
+							{...currentScheduleFieldAccessor().startTime.as('text')}
 							bind:value={enrollmentDraft.startTime}
 						/>
 					</label>
@@ -1549,34 +1607,50 @@
 						<span>Selesai</span>
 						<input
 							type="datetime-local"
-							{...selectedEnrollmentId
-								? updateEnrollmentForm().fields.endTime.as('text')
-								: createEnrollmentForm().fields.endTime.as('text')}
+							{...currentScheduleFieldAccessor().endTime.as('text')}
 							bind:value={enrollmentDraft.endTime}
 						/>
 					</label>
 
 					<label>
 						<span>Semester</span>
-						<select
-							{...selectedEnrollmentId
-								? updateEnrollmentForm().fields.semester.as('select')
-								: createEnrollmentForm().fields.semester.as('select')}
-							bind:value={enrollmentDraft.semester}
-						>
-							<option value="GANJIL">GANJIL</option>
-							<option value="GENAP">GENAP</option>
-						</select>
+						{#if termStepLocked}
+							{#if builderMode === 'edit'}
+								<input
+									type="hidden"
+									{...updateEnrollmentForm().fields.semester.as('text')}
+									value={enrollmentDraft.semester}
+								/>
+							{/if}
+							<input value={enrollmentDraft.semester} readonly disabled />
+						{:else}
+							<select
+								{...createEnrollmentForm().fields.semester.as('select')}
+								bind:value={enrollmentDraft.semester}
+							>
+								<option value="GANJIL">GANJIL</option>
+								<option value="GENAP">GENAP</option>
+							</select>
+						{/if}
 					</label>
 
 					<label>
 						<span>Tahun akademik</span>
-						<input
-							{...selectedEnrollmentId
-								? updateEnrollmentForm().fields.academicYear.as('text')
-								: createEnrollmentForm().fields.academicYear.as('text')}
-							bind:value={enrollmentDraft.academicYear}
-						/>
+						{#if termStepLocked}
+							{#if builderMode === 'edit'}
+								<input
+									type="hidden"
+									{...updateEnrollmentForm().fields.academicYear.as('text')}
+									value={enrollmentDraft.academicYear}
+								/>
+							{/if}
+							<input value={enrollmentDraft.academicYear} readonly disabled />
+						{:else}
+							<input
+								{...createEnrollmentForm().fields.academicYear.as('text')}
+								bind:value={enrollmentDraft.academicYear}
+							/>
+						{/if}
 					</label>
 				</div>
 				<div class="builder-section-actions split">
@@ -1610,9 +1684,7 @@
 							<span>Ruang</span>
 							<input
 								type="hidden"
-								{...selectedEnrollmentId
-									? updateEnrollmentForm().fields.classRoomId.as('text')
-									: createEnrollmentForm().fields.classRoomId.as('text')}
+								{...currentScheduleFieldAccessor().classRoomId.as('text')}
 								value={enrollmentDraft.classRoomId}
 							/>
 							<div
@@ -1667,8 +1739,7 @@
 												class="combobox-option"
 												class:active={roomPickerActiveIndex === index ||
 													enrollmentDraft.classRoomId === room.id}
-												onmousedown={(e) => {
-													e.preventDefault();
+												onclick={() => {
 													selectRoomPickerOption(room);
 												}}
 												onfocus={() => (roomPickerActiveIndex = index)}
@@ -1692,8 +1763,7 @@
 													type="button"
 													class="combobox-more"
 													disabled={!roomPickerHasMore || roomPickerLoading}
-													onmousedown={(e) => {
-														e.preventDefault();
+													onclick={() => {
 														onLoadMoreRoomPickerOptions();
 													}}
 												>
@@ -1805,7 +1875,7 @@
 							>Kembali</Button
 						>
 						<Button type="submit" class="primary-button builder-submit"
-							>{selectedEnrollmentId ? 'Simpan perubahan' : 'Simpan jadwal'}</Button
+							>{builderSubmitLabel}</Button
 						>
 					</div>
 				</div>
