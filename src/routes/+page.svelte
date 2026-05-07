@@ -181,7 +181,11 @@
 		updateEnrollment,
 		deleteEnrollment,
 		bulkDeleteEnrollments,
-		bulkUpdateEnrollments
+		bulkUpdateEnrollments,
+		requestEnrollment,
+		approveEnrollment,
+		rejectEnrollment,
+		cancelEnrollmentRequest
 	} from './enrollments/data.remote';
 	import {
 		getGrades,
@@ -263,6 +267,7 @@
 	};
 
 	type BuilderStep = 'participant' | 'time' | 'room' | 'review';
+	type BuilderMode = 'create' | 'edit' | 'approve';
 	type DataCollectionKey =
 		| 'classrooms'
 		| 'courses'
@@ -386,13 +391,14 @@
 			schedule_id: member.scheduleId,
 			semester: member.semester,
 			academic_year: member.academicYear,
-			student_name: member.studentName,
+		 student_name: member.studentName,
 			course_name: member.courseName,
 			lecturer_name: member.lecturerName,
 			class_room_name: member.classRoomName,
 			schedule_day: member.day,
 			schedule_start_time: member.startTime,
-			schedule_end_time: member.endTime
+			schedule_end_time: member.endTime,
+			status: 'APPROVED'
 		};
 	}
 
@@ -1276,8 +1282,8 @@
 			setTimer: (value) => (studentPickerRefreshTimer = value),
 			run: () => void refreshStudentPickerOptions(null),
 			delay,
-			clearTimer: window.clearTimeout,
-			setTimeoutFn: window.setTimeout
+			clearTimer: (value) => window.clearTimeout(value),
+			setTimeoutFn: (callback, wait) => window.setTimeout(callback, wait)
 		});
 	}
 
@@ -1288,8 +1294,8 @@
 			setTimer: (value) => (coursePickerRefreshTimer = value),
 			run: () => void refreshCoursePickerOptions(null),
 			delay,
-			clearTimer: window.clearTimeout,
-			setTimeoutFn: window.setTimeout
+			clearTimer: (value) => window.clearTimeout(value),
+			setTimeoutFn: (callback, wait) => window.setTimeout(callback, wait)
 		});
 	}
 
@@ -1300,8 +1306,8 @@
 			setTimer: (value) => (scheduleCourseFilterRefreshTimer = value),
 			run: () => void refreshScheduleCourseFilterOptions(null),
 			delay,
-			clearTimer: window.clearTimeout,
-			setTimeoutFn: window.setTimeout
+			clearTimer: (value) => window.clearTimeout(value),
+			setTimeoutFn: (callback, wait) => window.setTimeout(callback, wait)
 		});
 	}
 
@@ -1312,8 +1318,8 @@
 			setTimer: (value) => (scheduleLecturerFilterRefreshTimer = value),
 			run: () => void refreshScheduleLecturerFilterOptions(null),
 			delay,
-			clearTimer: window.clearTimeout,
-			setTimeoutFn: window.setTimeout
+			clearTimer: (value) => window.clearTimeout(value),
+			setTimeoutFn: (callback, wait) => window.setTimeout(callback, wait)
 		});
 	}
 
@@ -1804,8 +1810,8 @@
 			setTimer: (value) => (roomPickerRefreshTimer = value),
 			run: () => void refreshRoomPickerOptions(null),
 			delay,
-			clearTimer: window.clearTimeout,
-			setTimeoutFn: window.setTimeout
+			clearTimer: (value) => window.clearTimeout(value),
+			setTimeoutFn: (callback, wait) => window.setTimeout(callback, wait)
 		});
 	}
 
@@ -1816,13 +1822,25 @@
 			setTimer: (value) => (scheduleRoomFilterRefreshTimer = value),
 			run: () => void refreshScheduleRoomFilterOptions(null),
 			delay,
-			clearTimer: window.clearTimeout,
-			setTimeoutFn: window.setTimeout
+			clearTimer: (value) => window.clearTimeout(value),
+			setTimeoutFn: (callback, wait) => window.setTimeout(callback, wait)
 		});
 	}
 
 	function viewDataPlan(view: ViewId, role: AppRole | undefined): ViewDataPlan {
 		return viewDataPlanForRole(view, role) as ViewDataPlan;
+	}
+
+	function getViewIssues(view: ViewId, role: AppRole | undefined): string[] {
+		const plan = viewDataPlan(view, role);
+		const keys = new Set<DataCollectionKey>(plan.collections);
+		if (plan.requiresSchedulePreview) {
+			keys.add('enrollments');
+		}
+
+		return Array.from(keys)
+			.map((key) => collectionIssues[key])
+			.filter((message): message is string => Boolean(message));
 	}
 
 	async function ensureViewData(view: ViewId, force = false) {
@@ -2513,8 +2531,15 @@
 			selectedEnrollmentRecord ??
 			null
 	);
+	const builderMode = $derived.by<BuilderMode>(() => {
+		if (!selectedEnrollmentId) return 'create';
+		return selectedEnrollment?.status === 'PENDING' ? 'approve' : 'edit';
+	});
 	const selectedGrade = $derived(
 		grades.find((item) => item.id === selectedGradeId) ?? selectedGradeRecord ?? null
+	);
+	const approvedEnrollmentOptions = $derived(
+		enrollments.filter((item) => item.status === 'APPROVED')
 	);
 	const selectedGradeEnrollment = $derived(
 		enrollments.find((item) => item.id === gradeDraft.enrollmentId) ?? null
@@ -3611,6 +3636,50 @@
 		message:
 			'Jadwal diperbarui. Periksa kembali konflik dan kecocokan ruang sebelum menutup halaman.'
 	});
+	const requestEnrollmentEnhance = buildCreateRefreshEnhancer({
+		createEnhancer,
+		form: requestEnrollment,
+		refresh: refreshDependencies,
+		plan: () => cloneRefreshPlan(enrollmentGradesRefreshPlan),
+		after: () => clearSelection('builder'),
+		notify: reportSuccess,
+		message: 'Pengajuan mata kuliah berhasil dikirim. Menunggu persetujuan dosen/admin.'
+	});
+	const approveEnrollmentEnhance = buildCreateRefreshEnhancer({
+		createEnhancer,
+		form: approveEnrollment,
+		refresh: refreshDependencies,
+		plan: () => cloneRefreshPlan(enrollmentGradesRefreshPlan),
+		after: () => syncBuilderSelection(),
+		notify: reportSuccess,
+		message: 'KRS berhasil disetujui dan jadwal ditetapkan.'
+	});
+	async function handleCancelEnrollmentRequest(id: string) {
+		try {
+			await cancelEnrollmentRequest(id);
+			if (selectedEnrollmentId === id) {
+				clearSelection('enrollments');
+			}
+			await refreshDependencies({ collections: ['enrollments'], includeSchedulePreview: true });
+			setFeedback('success', 'Pengajuan berhasil dibatalkan.');
+		} catch (err) {
+			const message = (err as { body?: { message?: string }; message?: string })?.body?.message;
+			setFeedback('danger', message || 'Gagal membatalkan pengajuan.');
+		}
+	}
+	async function handleRejectEnrollment(id: string) {
+		try {
+			await rejectEnrollment(id);
+			if (selectedEnrollmentId === id) {
+				clearSelection('enrollments');
+			}
+			await refreshDependencies({ collections: ['enrollments'], includeSchedulePreview: true });
+			setFeedback('success', 'Pengajuan berhasil ditolak.');
+		} catch (err) {
+			const message = (err as { body?: { message?: string }; message?: string })?.body?.message;
+			setFeedback('danger', message || 'Gagal menolak pengajuan.');
+		}
+	}
 	const createGradeEnhance = buildCreateRefreshEnhancer({
 		createEnhancer,
 		form: createGrade,
@@ -3849,8 +3918,8 @@
 				ids.has(enrollment.id ?? '')
 					? {
 							...enrollment,
-							semester: bulkEditEnrollmentSemester,
-							academic_year: bulkEditEnrollmentAcademicYear
+							semester: bulkEditEnrollmentSemester || enrollment.semester,
+							academic_year: bulkEditEnrollmentAcademicYear || enrollment.academic_year
 						}
 					: enrollment
 			);
@@ -3859,6 +3928,8 @@
 		plan: () => cloneRefreshPlan(enrollmentGradesRefreshPlan),
 		after: () => {
 			bulkClear('enrollments');
+			bulkEditEnrollmentSemester = '';
+			bulkEditEnrollmentAcademicYear = '';
 			editorView = null;
 		},
 		notify: reportSuccess,
@@ -4079,6 +4150,17 @@
 		viewRefreshLoading = true;
 		try {
 			await refreshViewData(activeView);
+			const issues = getViewIssues(
+				activeView,
+				currentUser.current?.role as AppRole | undefined
+			);
+			if (issues.length) {
+				setFeedback(
+					'danger',
+					`${pageHeading(activeView, currentUser.current?.role as AppRole | undefined)} belum bisa dimuat sepenuhnya. Coba lagi atau refresh halaman.`
+				);
+				return;
+			}
 			setFeedback(
 				'success',
 				`${pageHeading(activeView, currentUser.current?.role as AppRole | undefined)} berhasil dimuat ulang.`
@@ -4096,6 +4178,11 @@
 		}
 	}
 
+	function refreshPage() {
+		if (!browser) return;
+		window.location.reload();
+	}
+
 	const navigationGroups = $derived(
 		navigationGroupsForRole(currentUser.current?.role as AppRole | undefined)
 	);
@@ -4105,17 +4192,9 @@
 	const currentViewPlan = $derived(
 		viewDataPlan(activeView, currentUser.current?.role as AppRole | undefined)
 	);
-	const activeViewIssues = $derived.by(() => {
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity
-		const keys = new Set<DataCollectionKey>(currentViewPlan.collections);
-		if (currentViewPlan.requiresSchedulePreview) {
-			keys.add('enrollments');
-		}
-
-		return Array.from(keys)
-			.map((key) => collectionIssues[key])
-			.filter((message): message is string => Boolean(message));
-	});
+	const activeViewIssues = $derived(
+		getViewIssues(activeView, currentUser.current?.role as AppRole | undefined)
+	);
 	const courseEditorBlocked = $derived(
 		Boolean(collectionIssues.studyPrograms || collectionIssues.lecturers) &&
 			(!studyPrograms.length || !lecturers.length)
@@ -4197,6 +4276,7 @@
 
 	const calendarViewProps = $derived.by(() =>
 		buildCalendarViewProps({
+			currentRole: requireCurrentRole(),
 			calendarWeekLabel,
 			courses,
 			lecturers,
@@ -4233,7 +4313,8 @@
 			navigateToEntity,
 			openBuilderForSchedule,
 			focusSchedule,
-			handleKeyboardClick
+			handleKeyboardClick,
+			studentStudyProgramId: currentUser.current?.studyProgramId ?? null
 		})
 	);
 
@@ -4293,8 +4374,11 @@
 			roomPickerHasMore,
 			createEnrollment,
 			updateEnrollment,
+			approveEnrollment,
+			builderMode,
 			createEnrollmentEnhance,
 			updateEnrollmentEnhance,
+			approveEnrollmentEnhance,
 			handleKeyboardClick,
 			onClearSelection: () => clearSelection('builder'),
 			onQueueEnrollmentRefresh: (delay?: number) => queueCollectionRefresh('enrollments', delay),
@@ -4677,9 +4761,19 @@
 			scheduleActiveFilterCount,
 			collectionPagination: collectionPagination.enrollments,
 			bulkUpdateEnrollmentsEnhance,
+			bulkEditEnrollmentSemester,
+			bulkEditEnrollmentAcademicYear,
+			requestEnrollmentEnhance,
+			studentStudyProgramId: currentUser.current?.studyProgramId ?? null,
 			days,
 			timezone,
+			onBulkEditEnrollmentSemesterInput: (value: string) =>
+				(bulkEditEnrollmentSemester = value),
+			onBulkEditEnrollmentAcademicYearInput: (value: string) =>
+				(bulkEditEnrollmentAcademicYear = value),
 			onOpenBulkEdit: () => {
+				bulkEditEnrollmentSemester = '';
+				bulkEditEnrollmentAcademicYear = '';
 				editorView = 'enrollments-bulk';
 			},
 			onOpenBulkDelete: createBulkDeleteAction({
@@ -4690,6 +4784,14 @@
 				failureMessage: 'Gagal menghapus KRS terpilih.'
 			}),
 			onOpenBuilderForEnrollment: openBuilderForEnrollment,
+			onOpenBuilderForApproval: (item: SelectEnrollmentsResult) => {
+				pickEnrollment(item);
+				builderStep = 'time';
+				activeView = 'builder';
+			},
+			onCancelRequest: handleCancelEnrollmentRequest,
+			onRejectRequest: handleRejectEnrollment,
+			onStartRequest: () => clearSelection('enrollments'),
 			onResetScheduleFilters: resetScheduleFilters,
 			onPickEnrollment: pickEnrollment,
 			onDayChange: () => queueCollectionRefresh('enrollments', 0),
@@ -4745,8 +4847,9 @@
 				createGradeEnhance,
 				updateGradeEnhance,
 				bulkUpdateGradesEnhance,
-				enrollments,
+				enrollments: approvedEnrollmentOptions,
 				courses,
+				studentStudyProgramId: currentUser.current?.studyProgramId ?? null,
 				enrollmentsIssue: collectionIssues.enrollments,
 				gradeEditorBlocked,
 				onPickGrade: pickGrade,
@@ -4957,12 +5060,18 @@
 				<section class="support-warning">
 					<div class="support-warning-head">
 						<p class="warning-title">Sebagian data pendukung belum tersedia</p>
-						<Button
-							variant="ghost"
-							size="sm"
-							class="ghost-button"
-							onclick={() => void ensureViewData(activeView, true)}>Coba lagi</Button
-						>
+						<div class="warning-actions">
+							<Button
+								variant="ghost"
+								size="sm"
+								class="ghost-button"
+								onclick={handleRefreshCurrentView}
+								disabled={viewRefreshLoading}
+							>
+								{viewRefreshLoading ? 'Memuat...' : 'Coba lagi'}
+							</Button>
+							<Button variant="outline" size="sm" onclick={refreshPage}>Refresh halaman</Button>
+						</div>
 					</div>
 					<ul class="support-warning-list">
 						{#each activeViewIssues as issue, index (`${activeView}-${index}`)}
