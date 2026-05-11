@@ -1986,6 +1986,16 @@
 		return viewDataPlanForRole(view, role) as ViewDataPlan;
 	}
 
+	function shouldLoadClassRoomDashboard(view: ViewId, role: AppRole | undefined) {
+		return view === 'dashboard' && role === 'ADMIN';
+	}
+
+	function shouldLoadConflictAudit(view: ViewId, role: AppRole | undefined) {
+		if (role === 'STUDENT') return false;
+		if (view === 'dashboard') return role === 'ADMIN';
+		return view === 'calendar' || view === 'builder';
+	}
+
 	function getViewIssues(view: ViewId, role: AppRole | undefined): string[] {
 		const plan = viewDataPlan(view, role);
 		const keys = new Set<DataCollectionKey>(plan.collections);
@@ -2012,7 +2022,7 @@
 			);
 		}
 
-		if (view === 'dashboard' && role !== 'STUDENT' && (force || !classRoomDashboardLoaded)) {
+		if (shouldLoadClassRoomDashboard(view, role) && (force || !classRoomDashboardLoaded)) {
 			tasks.push(
 				refreshClassRoomDashboard().catch((error) => {
 					setCollectionIssue('classrooms', errorMessage(error, 'Dashboard ruang gagal dimuat.'));
@@ -2093,10 +2103,10 @@
 		await refreshDependencies({
 			collections: plan.collections,
 			includeSchedulePreview: plan.requiresSchedulePreview,
-			includeConflictAudit: true,
+			includeConflictAudit: shouldLoadConflictAudit(view, role),
 			forceCollections: true
 		});
-		if (view === 'dashboard' && role !== 'STUDENT') {
+		if (shouldLoadClassRoomDashboard(view, role)) {
 			await refreshClassRoomDashboard(null, {
 				history: [],
 				pageNumber: 1,
@@ -2333,7 +2343,9 @@
 	$effect(() => {
 		const userId = currentUser.current?.id ?? null;
 		const view = activeView;
+		const role = currentUser.current?.role as AppRole | undefined;
 		if (!userId || !['dashboard', 'calendar', 'builder'].includes(view)) return;
+		if (!shouldLoadConflictAudit(view, role)) return;
 		if (!schedulePreviewLoaded || schedulePreview.loading) return;
 		const _deps = [
 			scheduleAcademicYearFilter,
