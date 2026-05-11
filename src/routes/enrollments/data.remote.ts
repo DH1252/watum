@@ -3,6 +3,11 @@ import { randomUUID } from "crypto";
 import * as v from "valibot";
 import { command, form, query } from "$app/server";
 import {
+	createDefaultEnrollmentPolicy,
+	isEnrollmentRequestsOpen,
+	normalizeEnrollmentPolicy,
+} from "$lib/app/enrollment-policy";
+import {
 	getListQueryCursor,
 	getListQueryLimit,
 	getPool,
@@ -13,6 +18,7 @@ import {
 import { requireRole, requireUser } from "$lib/server/auth";
 import {
 	auditEnrollmentConflicts,
+	type ConflictAuditResult,
 	invalidateConflictAuditCache,
 } from "$lib/server/conflict-audit";
 import {
@@ -58,14 +64,10 @@ type ConflictNamedResult =
 type EnrollmentPolicyRow = {
 	semester: string;
 	academic_year: string;
-	student_enrollment_requests_open: number | boolean;
+	student_enrollment_requests_open: unknown;
 };
 
-const DEFAULT_ENROLLMENT_POLICY = {
-	semester: "GANJIL",
-	academicYear: "2025/2026",
-	requestsOpen: false,
-} as const;
+const DEFAULT_ENROLLMENT_POLICY = createDefaultEnrollmentPolicy();
 
 const enrollmentPolicySchema = v.object({
 	semester: v.picklist(["GANJIL", "GENAP"]),
@@ -245,14 +247,11 @@ async function readEnrollmentPolicy() {
 		"SELECT semester, academic_year, student_enrollment_requests_open FROM enrollment_policy WHERE id = 1 LIMIT 1",
 	);
 	const [row] = rows as EnrollmentPolicyRow[];
-	return {
-		semester:
-			row?.semester === "GENAP" ? "GENAP" : DEFAULT_ENROLLMENT_POLICY.semester,
-		academicYear: row?.academic_year ?? DEFAULT_ENROLLMENT_POLICY.academicYear,
-		requestsOpen:
-			row?.student_enrollment_requests_open === true ||
-			row?.student_enrollment_requests_open === 1,
-	};
+	return normalizeEnrollmentPolicy({
+		semester: row?.semester,
+		academicYear: row?.academic_year,
+		requestsOpen: row?.student_enrollment_requests_open,
+	});
 }
 
 export const getEnrollmentPolicy = query(async () => {
@@ -265,16 +264,18 @@ export const updateEnrollmentPolicy = form(
 	async (data) => {
 		await requireRole(["ADMIN"]);
 		await ensureEnrollmentPolicyRow();
+		const nextPolicy = normalizeEnrollmentPolicy(data);
 		await getPool().query(
 			`UPDATE enrollment_policy
 		 SET semester = ?, academic_year = ?, student_enrollment_requests_open = ?
 		 WHERE id = 1`,
 			[
-				data.semester,
-				data.academicYear.trim(),
-				data.requestsOpen === "on" || data.requestsOpen === "true",
+				nextPolicy.semester,
+				nextPolicy.academicYear,
+				isEnrollmentRequestsOpen(nextPolicy.requestsOpen) ? 1 : 0,
 			],
 		);
+		getEnrollmentPolicy().set(nextPolicy);
 		return { success: true };
 	},
 );
@@ -332,8 +333,8 @@ async function selectSchedulePreviewRows(
 		if (!courseIds.length) return [];
 		const sql = [
 			selectSql,
-			"FROM courses c",
-			"INNER JOIN enrollments e FORCE INDEX (PRIMARY) ON e.course_id = c.id",
+			"FROM enrollments e FORCE INDEX (idx_enrollments_course_schedule_id)",
+			"INNER JOIN courses c ON e.course_id = c.id",
 			"INNER JOIN students s ON e.student_id = s.id",
 			"INNER JOIN lecturers l ON c.lecturer_id = l.id",
 			"LEFT JOIN class_rooms cr ON e.class_room_id = cr.id",
@@ -979,10 +980,100 @@ const conflictAuditSchema = v.object({
 	),
 });
 
+type ConflictAuditInput = v.InferOutput<typeof conflictAuditSchema>;
+
+function emptyConflictAudit(
+	filters: ConflictAuditInput,
+	lecturerScope: string | null,
+): ConflictAuditResult {
+	return {
+		filters: {
+			academicYear: filters.academicYear ?? null,
+			semester: filters.semester ?? null,
+			lecturerScope,
+		},
+		summary: {
+			totalGroups: 0,
+			roomGroups: 0,
+			studentGroups: 0,
+			lecturerGroups: 0,
+			conflictedEnrollments: 0,
+			conflictedRooms: 0,
+			conflictedStudents: 0,
+			conflictedLecturers: 0,
+		},
+		truncated: false,
+		groups: [],
+	};
+}
+
+async function selectLecturerAuditEnrollmentIds(
+	lecturerId: string,
+	filters: ConflictAuditInput,
+) {
+	const sqlParts = [
+		"SELECT e.id",
+		"FROM enrollments e",
+		"INNER JOIN courses c ON c.id = e.course_id",
+		"WHERE c.lecturer_id = ?",
+	];
+	const values: unknown[] = [lecturerId];
+	const requestedIds = filters.enrollmentIds?.filter(Boolean) ?? [];
+
+	if (requestedIds.length) {
+		sqlParts.push("AND e.id IN (?)");
+		values.push(requestedIds);
+	}
+	if (filters.academicYear) {
+		sqlParts.push("AND e.academic_year = ?");
+		values.push(filters.academicYear);
+	}
+	if (filters.semester) {
+		sqlParts.push("AND e.semester = ?");
+		values.push(filters.semester);
+	}
+	if (filters.day) {
+		sqlParts.push("AND e.schedule_day = ?");
+		values.push(filters.day);
+	}
+	if (filters.courseId) {
+		sqlParts.push("AND e.course_id = ?");
+		values.push(filters.courseId);
+	}
+	if (filters.classRoomId) {
+		sqlParts.push("AND e.class_room_id = ?");
+		values.push(filters.classRoomId);
+	}
+
+	sqlParts.push("ORDER BY e.id ASC", "LIMIT 500");
+	const [rows] = await getPool().query(sqlParts.join(" "), values);
+	return (rows as Array<{ id: string }>).map((row) => row.id).filter(Boolean);
+}
+
 export const getEnrollmentConflictAudit = query(
 	conflictAuditSchema,
 	async (filters) => {
 		const user = await requireRole(["ADMIN", "LECTURER"]);
+		if (user.role === "LECTURER") {
+			const focusEnrollmentIds = await selectLecturerAuditEnrollmentIds(
+				user.lecturerId!,
+				filters,
+			);
+			if (!focusEnrollmentIds.length) {
+				return emptyConflictAudit(filters, user.lecturerId ?? null);
+			}
+
+			return auditEnrollmentConflicts(getPool(), {
+				conflictType: filters.conflictType,
+				academicYear: filters.academicYear,
+				semester: filters.semester,
+				day: filters.day,
+				focusEnrollmentIds,
+				limitGroups: filters.limitGroups,
+				memberSampleSize: filters.memberSampleSize,
+			});
+		}
+
 		return auditEnrollmentConflicts(getPool(), {
 			conflictType: filters.conflictType,
 			academicYear: filters.academicYear,
@@ -993,10 +1084,7 @@ export const getEnrollmentConflictAudit = query(
 			focusEnrollmentIds: filters.enrollmentIds,
 			limitGroups: filters.limitGroups,
 			memberSampleSize: filters.memberSampleSize,
-			lecturerId:
-				user.role === "LECTURER"
-					? (user.lecturerId ?? undefined)
-					: filters.lecturerId,
+			lecturerId: filters.lecturerId,
 		});
 	},
 );
