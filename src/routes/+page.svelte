@@ -23,7 +23,7 @@
 		type RoomMetric,
 		type ScheduleCard
 	} from '$lib/app/academic';
-	import { formatDateTime, formatDateTimeInput, parseISO } from '$lib/time-helpers';
+	import { formatDateTime } from '$lib/time-helpers';
 	import {
 		headerAction,
 		navigationForRole,
@@ -418,7 +418,7 @@
 			schedule_id: member.scheduleId,
 			semester: member.semester,
 			academic_year: member.academicYear,
-		 student_name: member.studentName,
+			student_name: member.studentName,
 			course_name: member.courseName,
 			lecturer_name: member.lecturerName,
 			class_room_name: member.classRoomName,
@@ -2760,9 +2760,12 @@
 		}
 		return 'Data jadwal terlalu besar untuk dimuat penuh. Gunakan pencarian atau filter agar dashboard, kalender, dan penjadwalan menampilkan hasil yang akurat.';
 	});
-	const calendarNeedsFilters = $derived(scheduleActiveFilterCount === 0);
+	const calendarNeedsFilters = $derived(
+		currentUser.current?.role !== 'STUDENT' && scheduleActiveFilterCount === 0
+	);
 	const calendarExceedsVisibleLimit = $derived(
-		scheduleActiveFilterCount > 0 && filteredScheduleCards.length > CALENDAR_MAX_VISIBLE_SCHEDULES
+		currentUser.current?.role !== 'STUDENT' &&
+			filteredScheduleCards.length > CALENDAR_MAX_VISIBLE_SCHEDULES
 	);
 	const calendarCanRender = $derived(
 		!calendarNeedsFilters && !calendarExceedsVisibleLimit && filteredScheduleCards.length > 0
@@ -2836,8 +2839,8 @@
 	const availableRoomOptions = $derived.by(() => {
 		const roomOptions = roomPickerSourceOptions;
 		if (!enrollmentDraft.startTime || !enrollmentDraft.endTime) return roomOptions;
-		const startMinutes = toMinutes(parseISO(enrollmentDraft.startTime, timezone), timezone);
-		const endMinutes = toMinutes(parseISO(enrollmentDraft.endTime, timezone), timezone);
+		const startMinutes = toMinutes(enrollmentDraft.startTime, timezone);
+		const endMinutes = toMinutes(enrollmentDraft.endTime, timezone);
 		const availableRooms = availableRoomsForSlot(
 			roomOptions,
 			scheduleCards,
@@ -2905,7 +2908,7 @@
 	const draftTimeSummary = $derived.by(() => {
 		if (!timeStepReady) return 'Belum ditetapkan';
 		const dayLabel = DAY_LABELS[enrollmentDraft.day as keyof typeof DAY_LABELS];
-		return `${dayLabel} • ${formatTimeRange(parseISO(enrollmentDraft.startTime, timezone), parseISO(enrollmentDraft.endTime, timezone), timezone)}`;
+		return `${dayLabel} • ${formatTimeRange(enrollmentDraft.startTime, enrollmentDraft.endTime, timezone)}`;
 	});
 
 	function beginRecordSelection() {
@@ -3076,9 +3079,11 @@
 			classRoomId: item.class_room_id ?? '',
 			day: item.schedule_day ?? 'SENIN',
 			startTime: item.schedule_start_time
-				? formatDateTimeInput(item.schedule_start_time, timezone)
+				? formatDateTime(item.schedule_start_time, 'time', timezone)
 				: '',
-			endTime: item.schedule_end_time ? formatDateTimeInput(item.schedule_end_time, timezone) : '',
+			endTime: item.schedule_end_time
+				? formatDateTime(item.schedule_end_time, 'time', timezone)
+				: '',
 			semester: normalizeSemesterValue(item.semester),
 			academicYear: item.academic_year ?? '2025/2026',
 			timezone
@@ -4222,10 +4227,7 @@
 		viewRefreshLoading = true;
 		try {
 			await refreshViewData(activeView);
-			const issues = getViewIssues(
-				activeView,
-				currentUser.current?.role as AppRole | undefined
-			);
+			const issues = getViewIssues(activeView, currentUser.current?.role as AppRole | undefined);
 			if (issues.length) {
 				setFeedback(
 					'danger',
@@ -4322,6 +4324,7 @@
 		buildDashboardViewProps({
 			role: requireCurrentRole(),
 			nextSchedule,
+			scheduleCards,
 			enrollments,
 			grades,
 			studentGradeHighlights,
@@ -4844,8 +4847,7 @@
 			studentStudyProgramId: currentUser.current?.studyProgramId ?? null,
 			days,
 			timezone,
-			onBulkEditEnrollmentSemesterInput: (value: string) =>
-				(bulkEditEnrollmentSemester = value),
+			onBulkEditEnrollmentSemesterInput: (value: string) => (bulkEditEnrollmentSemester = value),
 			onBulkEditEnrollmentAcademicYearInput: (value: string) =>
 				(bulkEditEnrollmentAcademicYear = value),
 			onEnrollmentPolicyDraftSemesterInput: (value: 'GANJIL' | 'GENAP') =>
