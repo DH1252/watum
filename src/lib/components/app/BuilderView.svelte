@@ -1268,13 +1268,33 @@
 
 			{#if selectedEnrollmentId}
 				<input
-					type="hidden"
 					{...builderMode === 'approve'
 						? approveEnrollmentForm().fields.id.as('text')
 						: updateEnrollmentForm().fields.id?.as('text')}
+					type="hidden"
 					value={enrollmentDraft.id}
 				/>
 			{/if}
+			<input
+				{...currentScheduleFieldAccessor().day.as('text')}
+				type="hidden"
+				value={enrollmentDraft.day}
+			/>
+			<input
+				{...currentScheduleFieldAccessor().startTime.as('text')}
+				type="hidden"
+				value={enrollmentDraft.startTime}
+			/>
+			<input
+				{...currentScheduleFieldAccessor().endTime.as('text')}
+				type="hidden"
+				value={enrollmentDraft.endTime}
+			/>
+			<input
+				{...currentScheduleFieldAccessor().classRoomId.as('text')}
+				type="hidden"
+				value={enrollmentDraft.classRoomId}
+			/>
 
 			<section class="builder-snapshot">
 				<div>
@@ -1587,10 +1607,7 @@
 				<div class="editor-grid">
 					<label>
 						<span>Hari</span>
-						<select
-							{...currentScheduleFieldAccessor().day.as('select')}
-							bind:value={enrollmentDraft.day}
-						>
+						<select bind:value={enrollmentDraft.day}>
 							{#each days as day (day)}
 								<option value={day}>{DAY_LABELS[day]}</option>
 							{/each}
@@ -1599,20 +1616,12 @@
 
 					<label>
 						<span>Mulai</span>
-						<input
-							type="time"
-							{...currentScheduleFieldAccessor().startTime.as('text')}
-							bind:value={enrollmentDraft.startTime}
-						/>
+						<input type="time" bind:value={enrollmentDraft.startTime} />
 					</label>
 
 					<label>
 						<span>Selesai</span>
-						<input
-							type="time"
-							{...currentScheduleFieldAccessor().endTime.as('text')}
-							bind:value={enrollmentDraft.endTime}
-						/>
+						<input type="time" bind:value={enrollmentDraft.endTime} />
 					</label>
 
 					<label>
@@ -1685,11 +1694,6 @@
 					<div class="editor-grid builder-room-grid">
 						<label>
 							<span>Ruang</span>
-							<input
-								type="hidden"
-								{...currentScheduleFieldAccessor().classRoomId.as('text')}
-								value={enrollmentDraft.classRoomId}
-							/>
 							<div
 								class="combobox-wrap"
 								onfocusout={(e) => {
@@ -1897,10 +1901,8 @@
 
 	.builder-shell {
 		grid-template-columns: minmax(18rem, 0.72fr) minmax(0, 1.28fr);
-		height: clamp(32rem, calc(100dvh - 9.5rem), 56rem);
-		min-height: 0;
-		align-items: stretch;
-		overflow: hidden;
+		align-items: start;
+		overflow: visible;
 	}
 
 	.workspace-list,
@@ -1940,16 +1942,16 @@
 	}
 
 	.builder-list {
-		flex: 1 1 auto;
-		height: 100%;
+		height: auto;
 		min-height: 0;
 	}
 
 	.builder-list .list-stack {
-		flex: 1 1 auto;
-		height: 100%;
+		flex: 0 0 auto;
+		height: auto;
 		min-width: 0;
-		min-height: 0;
+		min-height: min(20rem, 38dvh);
+		max-height: clamp(20rem, calc(100dvh - 20rem), 38rem);
 		overflow: auto;
 		padding-right: 0.1rem;
 		scrollbar-gutter: stable;
@@ -1957,9 +1959,9 @@
 	}
 
 	.builder-detail {
-		height: 100%;
+		height: auto;
 		min-height: 0;
-		overflow: auto;
+		overflow: visible;
 		border-color: color-mix(in oklch, var(--color-accent-strong) 18%, var(--color-border) 82%);
 	}
 
@@ -2153,8 +2155,8 @@
 	}
 
 	.list-row.conflict {
-		background: var(--conflict-surface);
-		border-color: var(--conflict-border);
+		background: color-mix(in oklch, var(--conflict-bg) 86%, var(--color-panel) 14%);
+		border-color: var(--conflict-line);
 	}
 
 	.list-row.conflict.selected {
@@ -2191,7 +2193,7 @@
 	.list-row.conflict strong,
 	.list-row.conflict .list-conflict-copy,
 	.builder-conflict-copy {
-		color: var(--conflict-ink, var(--color-danger));
+		color: var(--conflict-text, var(--color-danger));
 	}
 
 	.list-conflict-copy,
@@ -2450,19 +2452,21 @@
 		gap: 0.75rem;
 		align-items: start;
 		padding: 0.9rem;
-		border: 1px solid var(--conflict-border, var(--color-border));
+		border: 1px solid var(--conflict-line, var(--color-border));
 		border-radius: 0.9rem;
 		background: color-mix(
 			in oklch,
-			var(--conflict-surface, var(--color-surface)) 86%,
+			var(--conflict-bg, var(--color-surface)) 86%,
 			var(--color-panel) 14%
 		);
 	}
 
 	.builder-conflict-card.selected {
 		box-shadow:
-			0 12px 24px color-mix(in oklch, var(--conflict-ink, var(--color-danger)) 10%, transparent 90%),
-			inset 0 0 0 1px color-mix(in oklch, var(--color-accent-strong) 38%, transparent 62%);
+			0 12px 24px
+				color-mix(in oklch, var(--conflict-text, var(--color-danger)) 12%, transparent 88%),
+			inset 0 0 0 1px
+				color-mix(in oklch, var(--conflict-line, var(--color-accent-strong)) 38%, transparent 62%);
 	}
 
 	.builder-conflict-card-copy {
@@ -2471,11 +2475,15 @@
 		min-width: 0;
 	}
 
+	.builder-conflict-card-copy strong {
+		color: var(--conflict-text, var(--color-foreground));
+	}
+
 	.builder-conflict-card-copy span,
 	.builder-conflict-card-copy small {
 		color: color-mix(
 			in oklch,
-			var(--conflict-ink, var(--color-muted-foreground)) 72%,
+			var(--conflict-text, var(--color-muted-foreground)) 72%,
 			var(--color-foreground) 28%
 		);
 		overflow-wrap: anywhere;
