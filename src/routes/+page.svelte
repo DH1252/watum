@@ -700,6 +700,63 @@
 		return normalized.startsWith('GEN') ? 'GENAP' : 'GANJIL';
 	}
 
+	function enrollmentDraftFromRecord(item: SelectEnrollmentsResult) {
+		return {
+			id: item.id ?? '',
+			studentId: item.student_id ?? '',
+			courseId: item.course_id ?? '',
+			classRoomId: item.class_room_id ?? '',
+			day: item.schedule_day ?? 'SENIN',
+			startTime: item.schedule_start_time
+				? formatDateTime(item.schedule_start_time, 'time', timezone)
+				: '',
+			endTime: item.schedule_end_time
+				? formatDateTime(item.schedule_end_time, 'time', timezone)
+				: '',
+			semester: normalizeSemesterValue(item.semester),
+			academicYear: item.academic_year ?? '2025/2026',
+			timezone
+		};
+	}
+
+	function enrollmentDraftMatches(left: typeof enrollmentDraft, right: typeof enrollmentDraft) {
+		return (
+			left.id === right.id &&
+			left.studentId === right.studentId &&
+			left.courseId === right.courseId &&
+			left.classRoomId === right.classRoomId &&
+			left.day === right.day &&
+			left.startTime === right.startTime &&
+			left.endTime === right.endTime &&
+			left.semester === right.semester &&
+			left.academicYear === right.academicYear &&
+			left.timezone === right.timezone
+		);
+	}
+
+	function syncEnrollmentPickerLabels(item: SelectEnrollmentsResult) {
+		const pickedStudent = item.student_id ? studentPickerLookup.get(item.student_id) : undefined;
+		const pickedCourse = item.course_id ? coursePickerLookup.get(item.course_id) : undefined;
+		studentPickerSearch = pickedStudent?.name ?? item.student_name ?? '';
+		coursePickerSearch = pickedCourse?.name ?? item.course_name ?? '';
+		roomPickerSearch = item.class_room_name ?? '';
+	}
+
+	async function hydratePickedEnrollment(id: string, seededDraft: typeof enrollmentDraft) {
+		try {
+			const full = await getEnrollment(id).run();
+			if (selectedEnrollmentId !== id) return;
+
+			selectedEnrollmentRecord = full;
+			if (!enrollmentDraftMatches(enrollmentDraft, seededDraft)) return;
+
+			enrollmentDraft = enrollmentDraftFromRecord(full);
+			syncEnrollmentPickerLabels(full);
+		} catch {
+			// The preview row is still usable if the follow-up hydration is unavailable.
+		}
+	}
+
 	function emptyGradeDraft() {
 		return { id: '', enrollmentId: '', assignmentScore: 80, midtermScore: 80, finalScore: 80 };
 	}
@@ -710,6 +767,44 @@
 
 	function roundUpHour(minutes: number) {
 		return Math.ceil(minutes / 60) * 60;
+	}
+
+	function roundDownHour(minutes: number) {
+		return Math.floor(minutes / 60) * 60;
+	}
+
+	function clampCalendarMinute(minutes: number) {
+		return Math.max(0, Math.min(minutes, 24 * 60));
+	}
+
+	function rangeForScheduleCards(cards: ScheduleCard[]) {
+		const validCards = cards.filter(
+			(card) =>
+				Number.isFinite(card.startMinutes) &&
+				Number.isFinite(card.endMinutes) &&
+				card.endMinutes > card.startMinutes
+		);
+
+		if (!validCards.length) {
+			return { start: DEFAULT_DAY_START, end: DEFAULT_DAY_END };
+		}
+
+		const firstStart = Math.min(...validCards.map((card) => card.startMinutes));
+		const lastEnd = Math.max(...validCards.map((card) => card.endMinutes));
+		let start = roundDownHour(clampCalendarMinute(firstStart - RANGE_PADDING_MINUTES));
+		let end = roundUpHour(clampCalendarMinute(lastEnd + RANGE_PADDING_MINUTES));
+
+		if (end - start < MIN_VISIBLE_MINUTES) {
+			const midpoint = (start + end) / 2;
+			start = roundDownHour(clampCalendarMinute(midpoint - MIN_VISIBLE_MINUTES / 2));
+			end = Math.min(start + MIN_VISIBLE_MINUTES, 24 * 60);
+
+			if (end - start < MIN_VISIBLE_MINUTES) {
+				start = Math.max(0, end - MIN_VISIBLE_MINUTES);
+			}
+		}
+
+		return { start, end };
 	}
 
 	function timeString(minutes: number) {
@@ -2435,25 +2530,7 @@
 		});
 		return `${formatter.format(start)} - ${formatter.format(end)}`;
 	});
-	const calendarVisibleRange = $derived.by(() => {
-		if (!filteredScheduleCards.length) {
-			return { start: DEFAULT_DAY_START, end: DEFAULT_DAY_END };
-		}
-
-		const start = DEFAULT_DAY_START;
-		let end = roundUpHour(
-			Math.min(
-				Math.max(...filteredScheduleCards.map((card) => card.endMinutes)) + RANGE_PADDING_MINUTES,
-				24 * 60
-			)
-		);
-
-		if (end - start < MIN_VISIBLE_MINUTES) {
-			end = Math.min(start + MIN_VISIBLE_MINUTES, 24 * 60);
-		}
-
-		return { start, end };
-	});
+	const calendarVisibleRange = $derived.by(() => rangeForScheduleCards(filteredScheduleCards));
 	const calendarSessionCountByDay = $derived.by(() =>
 		Object.fromEntries(
 			DAY_ORDER.map((day) => [day, filteredScheduleCards.filter((card) => card.day === day).length])
@@ -2508,6 +2585,11 @@
 		eventClassNames(info: { event: { id: string; extendedProps: { card?: ScheduleCard } } }) {
 			const card = info.event.extendedProps.card;
 			const classes = ['watum-ec-event'];
+			if (card?.durationMinutes && card.durationMinutes <= 30) {
+				classes.push('is-tiny');
+			} else if (card?.durationMinutes && card.durationMinutes <= 45) {
+				classes.push('is-short');
+			}
 			if (card?.hasConflict) classes.push('is-conflict');
 			if (info.event.id === effectiveSelectedScheduleId) classes.push('is-selected');
 			if (selectedConflictGroupId) {
@@ -2522,14 +2604,38 @@
 		eventContent(info: { event: { extendedProps: { card?: ScheduleCard } } }) {
 			const card = info.event.extendedProps.card;
 			if (!card) return undefined;
+			const timeLabel = `${escapeHtml(card.startLabel)} - ${escapeHtml(card.endLabel)}`;
+			const metaLabel = `${escapeHtml(card.room)} • ${escapeHtml(card.lecturer)}`;
+
+			if (card.durationMinutes <= 30) {
+				return {
+					html: `
+						<div class="watum-event-copy">
+							<span>${timeLabel}</span>
+							<strong>${escapeHtml(card.course)}</strong>
+						</div>
+					`
+				};
+			}
+
+			if (card.durationMinutes <= 45) {
+				return {
+					html: `
+						<div class="watum-event-copy">
+							<strong>${escapeHtml(card.course)}</strong>
+							<span>${timeLabel}</span>
+						</div>
+					`
+				};
+			}
 
 			return {
 				html: `
 					<div class="watum-event-copy">
 						${card.hasConflict ? '<span class="watum-event-flag">Bentrok</span>' : ''}
 						<strong>${escapeHtml(card.course)}</strong>
-						<span>${escapeHtml(card.startLabel)} - ${escapeHtml(card.endLabel)}</span>
-						<small>${escapeHtml(card.room)} • ${escapeHtml(card.lecturer)}</small>
+						<span>${timeLabel}</span>
+						<small>${metaLabel}</small>
 					</div>
 				`
 			};
@@ -3072,30 +3178,13 @@
 		selectedEnrollmentId = item.id ?? null;
 		selectedEnrollmentRecord = item;
 		builderStep = 'review';
-		enrollmentDraft = {
-			id: item.id ?? '',
-			studentId: item.student_id ?? '',
-			courseId: item.course_id ?? '',
-			classRoomId: item.class_room_id ?? '',
-			day: item.schedule_day ?? 'SENIN',
-			startTime: item.schedule_start_time
-				? formatDateTime(item.schedule_start_time, 'time', timezone)
-				: '',
-			endTime: item.schedule_end_time
-				? formatDateTime(item.schedule_end_time, 'time', timezone)
-				: '',
-			semester: normalizeSemesterValue(item.semester),
-			academicYear: item.academic_year ?? '2025/2026',
-			timezone
-		};
-		const pickedStudent = item.student_id ? studentPickerLookup.get(item.student_id) : undefined;
-		const pickedCourse = item.course_id ? coursePickerLookup.get(item.course_id) : undefined;
-		studentPickerSearch = pickedStudent?.name ?? item.student_name ?? '';
-		coursePickerSearch = pickedCourse?.name ?? item.course_name ?? '';
-		roomPickerSearch = item.class_room_name ?? '';
+		const seededDraft = enrollmentDraftFromRecord(item);
+		enrollmentDraft = seededDraft;
+		syncEnrollmentPickerLabels(item);
 		studentPickerOpen = false;
 		coursePickerOpen = false;
 		roomPickerOpen = false;
+		if (item.id) void hydratePickedEnrollment(item.id, seededDraft);
 	}
 
 	async function findEnrollmentSelection(id: string) {
