@@ -74,5 +74,11 @@ export function dashboardViewDataPlan(role: AppRole | undefined) {
 
 export function viewDataPlanForRole(view: ViewId, role: AppRole | undefined) {
 	if (view === "dashboard") return dashboardViewDataPlan(role);
+	if (view === "builder" && role === "LECTURER") {
+		return {
+			collections: ["enrollments", "courses"],
+			requiresSchedulePreview: false,
+		} as const;
+	}
 	return staticViewDataPlans[view];
 }
